@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -288,10 +289,25 @@ def session_scope(engine: Engine) -> Generator[Session, None, None]:
         session.close()
 
 
+def _fts_match(query: str) -> str:
+    """Build a safe FTS5 MATCH expression.
+
+    Wrapping the whole query in quotes would make it a phrase search, so
+    "TLS certificate renew" only matches that exact contiguous text and real
+    documents never hit. Terms are joined with OR and bm25() does the ranking;
+    stripping non-word characters first also removes any FTS operator syntax a
+    caller might inject.
+    """
+    terms = [t for t in re.split(r"[^0-9A-Za-z_]+", query.lower()) if len(t) > 1]
+    if not terms:
+        return ""
+    return " OR ".join(f'"{t}"' for t in dict.fromkeys(terms))
+
+
 def search_chunks(engine: Engine, query: str, limit: int = 5) -> list[dict[str, Any]]:
     """BM25-ranked FTS5 retrieval. Returns chunks with document provenance."""
-    safe = query.replace('"', " ").strip()
-    if not safe:
+    match = _fts_match(query)
+    if not match:
         return []
     sql = text(
         """
@@ -306,9 +322,7 @@ def search_chunks(engine: Engine, query: str, limit: int = 5) -> list[dict[str, 
     )
     try:
         with engine.connect() as conn:
-            rows = conn.execute(
-                sql, {"q": f'"{safe}"' if " " in safe else safe, "limit": limit}
-            ).all()
+            rows = conn.execute(sql, {"q": match, "limit": limit}).all()
     except Exception:  # noqa: BLE001
         return []
     return [
