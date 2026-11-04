@@ -1,4 +1,5 @@
 # NYXORA
+<<<<<<< HEAD
 
 **One Intelligence. Infinite Capabilities.**
 
@@ -120,3 +121,6 @@ Per the blueprint's honesty rule, claims are separated by evidence.
 - Model output and document text are untrusted input.
 - No secrets in Git. `.env` is ignored; `.env.example` is the contract.
 - Licenses for every dependency and model are recorded, never claimed as ours.
+=======
+NYXTHARVION is a next-generation Universal AI platform that unifies intelligent agents, local AI models, automation, memory, and secure tools into one powerful workspace—redefining
+>>>>>>> cf2e6f89eebd675937200fa813e753e42e3c6800

@@ -188,12 +188,12 @@ def test_memory_needs_confirmation_before_it_becomes_active(client: TestClient) 
     proposed = client.post("/memory", json={"content": "I prefer terse answers."})
     assert proposed.status_code == 201
     memory = proposed.json()["memory"]
-    assert memory["status"] == "pending"
+    assert memory["state"] == "pending"
     assert proposed.json()["requires_confirmation"] is True
 
     confirmed = client.post(f"/memory/{memory['id']}/confirm")
     assert confirmed.status_code == 200
-    assert confirmed.json()["memory"]["status"] == "active"
+    assert confirmed.json()["memory"]["state"] == "active"
 
 
 def test_secret_like_memory_is_blocked(client: TestClient) -> None:
@@ -213,14 +213,23 @@ def test_audit_log_is_readable_and_never_leaks_content(client: TestClient) -> No
 def test_emergency_stop_blocks_further_writes(client: TestClient, tmp_root: Path) -> None:
     stopped = client.post("/stop")
     assert stopped.status_code == 200
-    approval_id = client.post(
+    refused = client.post(
         "/tools/fs.create/request", json={"params": {"path": "after-stop.md", "content": "x"}}
-    ).json()["approval"]["id"]
-    decided = client.post(f"/approvals/{approval_id}/decide", json={"approved": True})
-    assert decided.status_code in (200, 403)
-    if decided.status_code == 200:
-        assert decided.json()["result"] is None
+    )
+    assert refused.status_code == 403, "an active stop must not even open an approval"
+    assert refused.json()["error"]["code"] == "permission_denied"
     assert workspace_file(tmp_root, "after-stop.md") is None
+
+
+def test_stop_is_released_only_by_an_explicit_resume(client: TestClient) -> None:
+    client.post("/stop")
+    blocked = client.post("/tools/fs.create/request", json={"params": {"path": "a.md", "content": "x"}})
+    assert blocked.status_code == 403
+    resumed = client.post("/resume")
+    assert resumed.status_code == 200
+    allowed = client.post("/tools/fs.create/request", json={"params": {"path": "a.md", "content": "x"}})
+    assert allowed.status_code == 200
+    assert allowed.json()["approval"]["id"]
 
 
 def test_settings_endpoint_does_not_echo_secrets(client: TestClient) -> None:
