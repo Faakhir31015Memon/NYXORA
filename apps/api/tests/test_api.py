@@ -71,7 +71,9 @@ def test_read_tool_runs_without_an_approval(client: TestClient, tmp_root: Path) 
     assert r.json()["auto_allowed"] is True
 
 
-def test_write_requires_approval_then_executes_and_undoes(client: TestClient, tmp_root: Path) -> None:
+def test_write_requires_approval_then_executes_and_undoes(
+    client: TestClient, tmp_root: Path
+) -> None:
     params = {"path": "note.md", "content": "written through the API"}
     requested = client.post("/tools/fs.create/request", json={"params": params})
     assert requested.status_code == 200
@@ -98,9 +100,9 @@ def test_write_requires_approval_then_executes_and_undoes(client: TestClient, tm
 
 def test_denied_approval_writes_nothing(client: TestClient, tmp_root: Path) -> None:
     params = {"path": "never.md", "content": "no"}
-    approval_id = client.post(
-        "/tools/fs.create/request", json={"params": params}
-    ).json()["approval"]["id"]
+    approval_id = client.post("/tools/fs.create/request", json={"params": params}).json()[
+        "approval"
+    ]["id"]
     decided = client.post(f"/approvals/{approval_id}/decide", json={"approved": False})
     assert decided.status_code == 200
     assert decided.json()["result"] is None
@@ -128,9 +130,7 @@ def test_path_escape_is_refused_at_the_api_boundary(client: TestClient) -> None:
 
 
 def test_denied_path_is_refused_through_the_api(client: TestClient) -> None:
-    r = client.post(
-        "/tools/fs.delete/request", json={"params": {"paths": [".env"]}}
-    )
+    r = client.post("/tools/fs.delete/request", json={"params": {"paths": [".env"]}})
     assert r.status_code in (400, 403, 422)
 
 
@@ -148,11 +148,11 @@ def test_invalid_payload_is_422_not_a_stack_trace(client: TestClient) -> None:
 
 def test_document_upload_is_searchable(client: TestClient) -> None:
     content = (
-        "# Deployment runbook\n\n"
-        "The staging gateway rotates its TLS certificate every 60 days on the "
-        "first Tuesday. If the certificate expires, traffic fails closed and the "
-        "on-call engineer must run `scripts/renew_staging_cert.sh` before retrying.\n"
-    ).encode("utf-8")
+        b"# Deployment runbook\n\n"
+        b"The staging gateway rotates its TLS certificate every 60 days on the "
+        b"first Tuesday. If the certificate expires, traffic fails closed and the "
+        b"on-call engineer must run `scripts/renew_staging_cert.sh` before retrying.\n"
+    )
     r = client.post(
         "/documents/upload",
         files={"file": ("runbook.md", content, "text/markdown")},
@@ -173,7 +173,9 @@ def test_document_upload_is_searchable(client: TestClient) -> None:
 
 
 def test_unsupported_upload_type_is_415(client: TestClient) -> None:
-    r = client.post("/documents/upload", files={"file": ("evil.exe", b"MZ", "application/octet-stream")})
+    r = client.post(
+        "/documents/upload", files={"file": ("evil.exe", b"MZ", "application/octet-stream")}
+    )
     assert r.status_code == 415
     assert r.json()["error"]["code"] == "unsupported_type"
 
@@ -197,13 +199,17 @@ def test_memory_needs_confirmation_before_it_becomes_active(client: TestClient) 
 
 
 def test_secret_like_memory_is_blocked(client: TestClient) -> None:
-    r = client.post("/memory", json={"content": "my openai api key is sk-abcdefghijklmnopqrstuvwxyz"})
+    r = client.post(
+        "/memory", json={"content": "my openai api key is sk-abcdefghijklmnopqrstuvwxyz"}
+    )
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "memory_blocked"
 
 
 def test_audit_log_is_readable_and_never_leaks_content(client: TestClient) -> None:
-    client.post("/tools/fs.create/request", json={"params": {"path": "audit.md", "content": "TOPSECRET"}})
+    client.post(
+        "/tools/fs.create/request", json={"params": {"path": "audit.md", "content": "TOPSECRET"}}
+    )
     entries = client.get("/audit-log").json()["entries"]
     assert entries
     blob = json.dumps(entries)
@@ -223,11 +229,15 @@ def test_emergency_stop_blocks_further_writes(client: TestClient, tmp_root: Path
 
 def test_stop_is_released_only_by_an_explicit_resume(client: TestClient) -> None:
     client.post("/stop")
-    blocked = client.post("/tools/fs.create/request", json={"params": {"path": "a.md", "content": "x"}})
+    blocked = client.post(
+        "/tools/fs.create/request", json={"params": {"path": "a.md", "content": "x"}}
+    )
     assert blocked.status_code == 403
     resumed = client.post("/resume")
     assert resumed.status_code == 200
-    allowed = client.post("/tools/fs.create/request", json={"params": {"path": "a.md", "content": "x"}})
+    allowed = client.post(
+        "/tools/fs.create/request", json={"params": {"path": "a.md", "content": "x"}}
+    )
     assert allowed.status_code == 200
     assert allowed.json()["approval"]["id"]
 

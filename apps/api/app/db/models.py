@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 import re
 from collections.abc import Generator
 from datetime import UTC, datetime
@@ -24,6 +24,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -235,27 +236,26 @@ CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON document_chunks BEGIN
 END;
 """
 
-FTS_UPDATE = """
-CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON document_chunks BEGIN
+FTS_DELETE = """
+CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON document_chunks BEGIN
     INSERT INTO document_chunks_fts(document_chunks_fts, rowid, content)
     VALUES ('delete', old.id, old.content);
-    INSERT INTO document_chunks_fts(rowid, content) VALUES (new.id, new.content);
 END;
 """
 
-FTS_STATEMENTS = (FTS_DDL, FTS_INSERT, FTS_DELETE, FTS_UPDATE)
+FTS_STATEMENTS = (FTS_DDL, FTS_INSERT, FTS_DELETE)
 
+FTS_REBUILD = "INSERT INTO document_chunks_fts(document_chunks_fts) VALUES('rebuild');"
 
-class FtsUnavailableError(RuntimeError):
-    """Raised when this SQLite build has no FTS5 module."""
+logger = logging.getLogger("nyxora.db")
 
 
 def make_engine(db_path: Path | str) -> Engine:
     """SQLite with WAL and foreign keys. `:memory:` is supported for tests.
 
-    Call init_db() before using the engine: the FTS tables and triggers can only
-    be installed once document_chunks exists, so they belong to schema creation,
-    not to connection setup.
+    Call init_db() before using the engine. The FTS triggers reference
+    document_chunks, so they can only be installed after that table exists -
+    attaching them to the connect event made them fail silently on every boot.
     """
     target = ":memory:" if str(db_path) == ":memory:" else str(Path(db_path))
     if target != ":memory:":
@@ -273,46 +273,59 @@ def make_engine(db_path: Path | str) -> Engine:
     return engine
 
 
-def install_fts(engine: Engine) -> bool:
-    """Create the FTS5 index and its triggers. True when the index is live.
+def fts5_supported(engine: Engine) -> bool:
+    """True when this SQLite build ships the FTS5 module.
 
-    Runs after create_all(), because CREATE TRIGGER ... ON document_chunks fails
-    with "no such table" while that table is still missing.
+    Probing with CREATE VIRTUAL TABLE is wrong here: pooled connections keep
+    temp tables, so the second probe fails with "already exists" and reads as
+    FTS5 being unavailable. The compiled module list is the direct answer.
     """
-    with contextlib.suppress(FtsUnavailableError):  # caller degrades to no-BM25 search
-        _fts_status(engine)
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text("SELECT 1 FROM pragma_module_list WHERE name = 'fts5'")).first()
+    except DBAPIError as exc:
+        logger.warning("cannot list SQLite modules, assuming no FTS5: %s", exc)
+        return False
+    return row is not None
+
+
+def install_fts(engine: Engine) -> bool:
+    """Create the FTS5 index and its triggers. False when FTS5 is missing."""
+    if not fts5_supported(engine):
+        return False
     with engine.begin() as conn:
         for ddl in FTS_STATEMENTS:
             conn.execute(text(ddl))
+        # Re-sync the index with document_chunks. Databases written while the
+        # triggers were missing have content rows and no index entries; 'rebuild'
+        # is the documented repair for an external-content FTS table.
+        conn.execute(text(FTS_REBUILD))
     return True
 
 
-def _fts_status(engine: Engine) -> None:
-    """Raise FtsUnavailableError if this SQLite build cannot do FTS5."""
-    with engine.connect() as conn:
-        try:
-            conn.execute(
-                text("CREATE VIRTUAL TABLE fts_probe USING fts5(body); DROP TABLE fts_probe;")
-            )
-        except Exception as exc:  # noqa: BLE001 - the only error we translate
-            msg = str(exc).lower()
-            if "no such module" in msg or "fts5" in msg:
-                raise FtsUnavailableError(str(exc)) from exc
-            raise
-
-
 def fts_ready(engine: Engine) -> bool:
-    """Whether BM25 retrieval is actually wired up in this database."""
+    """True only when the index and both sync triggers exist.
+
+    Half-installed FTS is worse than none: the index goes stale silently and
+    retrieval starts answering "not found" for documents that are on disk, so a
+    present virtual table is not proof of a working retriever.
+    """
     with engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT count(*) FROM sqlite_master WHERE name = 'chunks_ai'")
-        ).scalar()
-    return bool(row)
+        found = set(
+            conn.execute(
+                text(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE name IN ('document_chunks_fts', 'chunks_ai', 'chunks_ad')"
+                )
+            ).scalars()
+        )
+    return found == {"document_chunks_fts", "chunks_ai", "chunks_ad"}
 
 
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
-    install_fts(engine)
+    if not install_fts(engine):
+        logger.warning("document search falls back to LIKE matching; no BM25 ranking")
 
 
 def session_scope(engine: Engine) -> Generator[Session, None, None]:
@@ -328,51 +341,108 @@ def session_scope(engine: Engine) -> Generator[Session, None, None]:
         session.close()
 
 
+def _terms(query: str) -> list[str]:
+    """Lowercased word terms; non-word characters (and so all FTS operators) go."""
+    return [t for t in re.split(r"[^0-9A-Za-z_]+", query.lower()) if len(t) > 1]
+
+
 def _fts_match(query: str) -> str:
     """Build a safe FTS5 MATCH expression.
 
     Wrapping the whole query in quotes would make it a phrase search, so
     "TLS certificate renew" only matches that exact contiguous text and real
-    documents never hit. Terms are joined with OR and bm25() does the ranking;
-    stripping non-word characters first also removes any FTS operator syntax a
-    caller might inject.
+    documents never hit. Terms are joined with OR and bm25() does the ranking.
     """
-    terms = [t for t in re.split(r"[^0-9A-Za-z_]+", query.lower()) if len(t) > 1]
+    terms = list(dict.fromkeys(_terms(query)))
     if not terms:
         return ""
-    return " OR ".join(f'"{t}"' for t in dict.fromkeys(terms))
+    return " OR ".join(f'"{t}"' for t in terms)
+
+
+def _coverage(content: str, terms: list[str]) -> float:
+    """Fraction of query terms present in a chunk, as a 0..1 confidence signal.
+
+    bm25() has no fixed range, so it can order results but cannot say how
+    relevant one is; the honesty gate needs the latter. Stemmed FTS matches can
+    score lower here than they deserve, which errs toward "weak match, I will
+    not invent an answer" - the safe direction.
+    """
+    if not terms:
+        return 0.0
+    hay = content.lower()
+    return sum(1 for t in terms if t in hay) / len(terms)
 
 
 def search_chunks(engine: Engine, query: str, limit: int = 5) -> list[dict[str, Any]]:
-    """BM25-ranked FTS5 retrieval. Returns chunks with document provenance."""
+    """BM25-ranked FTS5 retrieval, with a LIKE scan when FTS5 is unavailable.
+
+    Returns chunks with document provenance. Both paths emit the same shape and
+    the same 0..1 score, so callers behave identically either way.
+    """
+    return (
+        _search_fts(engine, query, limit) if fts_ready(engine) else _scan_like(engine, query, limit)
+    )
+
+
+def _search_fts(engine: Engine, query: str, limit: int) -> list[dict[str, Any]]:
     match = _fts_match(query)
     if not match:
         return []
+    terms = list(dict.fromkeys(_terms(query)))
     sql = text(
         """
         SELECT c.id, c.doc_id, c.filename, c.page, c.chunk_idx, c.content,
-               bm25(document_chunks_fts) AS score
+               bm25(document_chunks_fts) AS rank
         FROM document_chunks_fts f
         JOIN document_chunks c ON c.id = f.rowid
         WHERE document_chunks_fts MATCH :q
-        ORDER BY score ASC
+        ORDER BY rank ASC
         LIMIT :limit
         """
     )
     try:
         with engine.connect() as conn:
             rows = conn.execute(sql, {"q": match, "limit": limit}).all()
-    except Exception:  # noqa: BLE001
+    except DBAPIError as exc:
+        logger.warning("FTS search failed, returning no results: %s", exc)
         return []
-    return [
-        {
-            "chunk_id": r[0],
-            "doc_id": r[1],
-            "filename": r[2],
-            "page": r[3],
-            "chunk_idx": r[4],
-            "content": r[5],
-            "score": -float(r[6]),
-        }
-        for r in rows
-    ]
+    return [_row_to_hit(r[:6], _coverage(r[5], terms)) for r in rows]
+
+
+def _scan_like(engine: Engine, query: str, limit: int) -> list[dict[str, Any]]:
+    """Substring retrieval for SQLite builds without FTS5.
+
+    Only term count and integer placeholder names reach the SQL string; every
+    query value is bound as a parameter.
+    """
+    terms = list(dict.fromkeys(_terms(query)))
+    if not terms:
+        return []
+    where = " OR ".join(f"lower(content) LIKE :t{i}" for i in range(len(terms)))
+    params: dict[str, Any] = {f"t{i}": f"%{t}%" for i, t in enumerate(terms)}
+    params["limit"] = limit * 4
+    sql = text(
+        f"""
+        SELECT id, doc_id, filename, page, chunk_idx, content
+        FROM document_chunks
+        WHERE {where}
+        LIMIT :limit
+        """
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(sql, params).all()
+    hits = [_row_to_hit(r[:6], _coverage(r[5], terms)) for r in rows]
+    hits.sort(key=lambda hit: hit["score"], reverse=True)
+    return hits[:limit]
+
+
+def _row_to_hit(row: Any, score: float) -> dict[str, Any]:
+    return {
+        "chunk_id": row[0],
+        "doc_id": row[1],
+        "filename": row[2],
+        "page": row[3],
+        "chunk_idx": row[4],
+        "content": row[5],
+        "score": round(score, 4),
+    }

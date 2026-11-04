@@ -5,8 +5,8 @@ Revises:
 Create Date: 2026-11-04 21:13:00.211690
 
 The FTS5 virtual table and its triggers are not portable through Alembic, so
-they live in app/db/models.py and are (re)installed by make_engine(create_fts=).
-Keep ordinary table changes here.
+they live in app/db/models.py and are (re)installed by init_db() once the
+ordinary tables exist. Keep ordinary table changes here.
 """
 
 from __future__ import annotations

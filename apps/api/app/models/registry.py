@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from app.models.base import Capability, ModelAdapter, ModelCapabilities, ModelInfo, ProviderKind
 

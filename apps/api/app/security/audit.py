@@ -63,6 +63,13 @@ def sanitize_params(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _digest(text: str) -> str:
+    """Length + 48-bit hash prefix: proves bytes changed without storing them.
+
+    Not reversible, but it does let someone with a candidate secret confirm a
+    guess offline, so a low-entropy password written straight into a file is
+    still partly exposed here. Recorded as a known limit in docs/security.md;
+    a keyed digest needs an install secret and belongs with the credential store.
+    """
     encoded = text.encode("utf-8")
     return f"{len(encoded)}B sha256:{hashlib.sha256(encoded).hexdigest()[:12]}"
 

@@ -173,12 +173,20 @@ async def test_audit_redacts_secrets_before_writing(file_tools: FileTools, tmp_r
         actor="test",
         outcome="executed",
         tool="fs.create",
-        params={"path": "a", "content": "API_KEY=sk-live-abcdef123456"},
+        params={
+            "path": "a",
+            "content": "API_KEY=sk-live-abcdef123456",
+            "note": "rotate token=old-token-value-9999 today",
+        },
         permission_class="write",
     )
     raw = (tmp_root / "audit.jsonl").read_text(encoding="utf-8")
     assert "sk-live-abcdef123456" not in raw
-    assert "REDACTED" in raw
+    assert "old-token-value-9999" not in raw
+    # file contents are replaced by a length+digest marker, not stored verbatim
+    assert "sha256:" in raw
+    # secret-shaped text inside an ordinary field still gets redacted
+    assert "[REDACTED]" in raw
 
 
 async def test_emergency_stop_blocks_tool_execution_entirely(
