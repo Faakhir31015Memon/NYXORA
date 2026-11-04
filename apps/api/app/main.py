@@ -72,7 +72,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        built = container or build_container(cfg, force_mock=force_mock)
+        built = container or build_container(cfg, force_mock=force_mock or cfg.force_mock)
         state["container"] = built
         app.state.container = built
         await built.registry.refresh()

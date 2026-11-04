@@ -30,6 +30,7 @@ class Result:
     latency_ms: float
     state: str
     detail: str
+    skipped: bool = False
 
 
 async def _one(case: EvalCase, root: Path, preferred_model: str | None) -> Result:
@@ -44,6 +45,9 @@ async def _one(case: EvalCase, root: Path, preferred_model: str | None) -> Resul
     container = build_container(settings, force_mock=True)
     started = time.perf_counter()
     try:
+        # Same boot sequence the API uses: the catalogue is only ever what an
+        # adapter actually reports, so without this the router sees no models.
+        await container.registry.refresh()
         outcome = await container.orchestrator.run(
             RunRequest(message=case.prompt, user_preferred_model=preferred_model)
         )
@@ -62,14 +66,17 @@ async def _one(case: EvalCase, root: Path, preferred_model: str | None) -> Resul
 
 
 def _markdown(results: list[Result], *, mode: str, model: str | None) -> str:
-    passed = sum(1 for r in results if r.passed)
+    scored = [r for r in results if not r.skipped]
+    passed = sum(1 for r in scored if r.passed)
+    skipped = len(results) - len(scored)
+    tally = f"Pass: {passed}/{len(scored)}" + (f" ({skipped} skipped)" if skipped else "")
     lines = [
         "# NYXORA evaluation report",
         "",
         f"Generated: {datetime.now(UTC).isoformat(timespec='seconds')}",
         f"Mode: **{mode}**",
         f"Model requested: `{model or 'router decides'}`",
-        f"Pass: {passed}/{len(results)}",
+        tally,
         "",
         "> Internal measurement only. These are pipeline checks against whichever",
         "> model happened to be installed. They are not capability claims and must",
@@ -79,8 +86,9 @@ def _markdown(results: list[Result], *, mode: str, model: str | None) -> str:
         "|---|---|---|---|---|---|",
     ]
     for r in results:
+        verdict = "skip" if r.skipped else ("yes" if r.passed else "NO")
         lines.append(
-            f"| {r.case.id} | {r.case.kind} | {'yes' if r.passed else 'NO'} "
+            f"| {r.case.id} | {r.case.kind} | {verdict} "
             f"| {r.state} | {r.latency_ms:.0f} | {r.detail[:60]} |"
         )
     if mode == "mock":
@@ -114,6 +122,11 @@ async def _run(argv: list[str]) -> dict[str, object]:
     with TemporaryDirectory(prefix="nyxora-evals-") as tmp:
         root = Path(tmp)
         for case in CASES:
+            if case.requires_real_model and not args.real:
+                results.append(
+                    Result(case, False, 0.0, "skipped", "model check, needs --real", True)
+                )
+                continue
             results.append(await _one(case, root, args.model))
     report = _markdown(results, mode="real" if args.real else "mock", model=args.model)
     if args.out:
@@ -122,8 +135,8 @@ async def _run(argv: list[str]) -> dict[str, object]:
     else:
         print(report)
     return {
-        "total": len(results),
-        "failed": [r.case.id for r in results if not r.passed],
+        "total": len([r for r in results if not r.skipped]),
+        "failed": [r.case.id for r in results if not r.passed and not r.skipped],
         "report": report,
     }
 

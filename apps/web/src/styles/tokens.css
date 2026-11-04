@@ -1,0 +1,85 @@
+/* Design tokens. Every colour, space and radius in the app comes from here, so a
+   theme change is a data-attribute flip and no component carries a literal. */
+
+:root {
+  color-scheme: dark;
+
+  /* type */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.25rem;
+  --leading: 1.55;
+
+  /* space: 4px scale, no arbitrary values */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  --z-base: 1;
+  --z-sticky: 10;
+  --z-modal: 100;
+  --z-palette: 200;
+
+  --row: 28px;
+  --rail: 260px;
+  --inspector: 380px;
+}
+
+[data-theme="dark"] {
+  --bg: #0d1015;
+  --surface: #141922;
+  --raised: #1b2230;
+  --line: #28313f;
+  --line-strong: #3b4759;
+  --text: #e7ecf3;
+  --text-dim: #9aa6b8;
+  --text-faint: #67728a;
+  --accent: #5eead4;
+  --accent-ink: #06231f;
+  --accent-soft: #14403a;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --danger-ink: #2a0b0b;
+  --focus: #7dd3fc;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --diff-add: #10301c;
+  --diff-del: #341417;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f6f8fb;
+  --surface: #ffffff;
+  --raised: #eef1f6;
+  --line: #d5dbe5;
+  --line-strong: #b3bccb;
+  --text: #171d27;
+  --text-dim: #4d5867;
+  --text-faint: #7c8797;
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --accent-soft: #d3f1ec;
+  --ok: #15803d;
+  --warn: #b45309;
+  --danger: #b91c1c;
+  --danger-ink: #ffffff;
+  --focus: #0369a1;
+  --shadow: 0 8px 24px rgba(20, 30, 45, 0.14);
+  --diff-add: #dcf5e3;
+  --diff-del: #fadedf;
+}

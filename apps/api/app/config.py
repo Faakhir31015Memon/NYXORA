@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     openai_api_key: str = Field("", alias="OPENAI_API_KEY")
     openai_base_url: str = Field("https://api.openai.com/v1", alias="OPENAI_BASE_URL")
 
+    # Development/demo switch: runs the deterministic mock adapter, so the UI and
+    # the pipeline can be exercised with no model installed. /health and the model
+    # list then report provider "mock" - it is never mistaken for a real model.
+    force_mock: bool = Field(False, alias="NYXORA_FORCE_MOCK")
+
     privacy_level: str = Field("local_only", alias="PRIVACY_LEVEL")
     log_level: str = Field("INFO", alias="LOG_LEVEL")
 

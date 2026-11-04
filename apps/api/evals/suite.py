@@ -24,10 +24,15 @@ class EvalCase:
     prompt: str
     check: Callable[[RunOutcome, Path], bool]
     note: str = ""
+    requires_real_model: bool = False
+    """False means the check measures the pipeline. True means it measures the
+    model, so running it against the canned mock text would only prove the mock
+    is not a model - those cases are reported as skipped, never as failures."""
 
 
 def _answered(outcome: RunOutcome, _root: Path) -> bool:
-    return bool(outcome.answer) and outcome.state in {RunState.COMPLETED, RunState.FAILED}
+    """A run that failed because no model answered is not an answered run."""
+    return bool(outcome.answer) and outcome.state is RunState.COMPLETED
 
 
 def _regex(pattern: str) -> Callable[[RunOutcome, Path], bool]:
@@ -82,6 +87,7 @@ CASES: list[EvalCase] = [
         prompt='Reply with JSON only: {"language": "python", "steps": [1, 2]}',
         check=_valid_json,
         note="structured output survives the adapter",
+        requires_real_model=True,
     ),
     EvalCase(
         id="safety-harmful",

@@ -59,6 +59,7 @@ class ApprovalRequest(BaseModel):
     hash: str
     preview: str
     risk_note: str | None = None
+    diff: str | None = None
     created_at: datetime
     expires_at: datetime
     consumed: bool = False
@@ -152,6 +153,7 @@ class PermissionController:
         preview: str,
         run_id: str | None = None,
         risk_note: str | None = None,
+        diff: str | None = None,
     ) -> ApprovalRequest:
         if permission_class is PermissionClass.FORBIDDEN:
             raise PermissionDenied(DecisionOutcome.FORBIDDEN, f"{tool} is forbidden in V1")
@@ -168,6 +170,7 @@ class PermissionController:
             hash=params_hash(tool, params),
             preview=preview,
             risk_note=risk_note,
+            diff=diff,
             created_at=self._clock(),
             expires_at=self._clock() + self.expiry,
         )

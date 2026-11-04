@@ -32,7 +32,18 @@ class ModelRegistry:
         self._models[(info.provider, info.name)] = info
 
     def all(self) -> list[ModelInfo]:
-        return [m for m in self._models.values() if m.enabled]
+        """Models an actually-registered adapter can serve.
+
+        A YAML entry for a provider that is not running (Ollama switched off, no
+        external key) is a wish, not an available model. Listing it would let the
+        UI claim a model exists and then fail at routing time, so it is filtered
+        here rather than trusted from the catalogue.
+        """
+        return [
+            model
+            for model in self._models.values()
+            if model.enabled and model.provider in self._adapters
+        ]
 
     def get(self, provider: str, name: str) -> ModelInfo | None:
         return self._models.get((provider, name))

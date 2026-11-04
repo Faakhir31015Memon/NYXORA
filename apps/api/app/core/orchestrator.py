@@ -452,6 +452,7 @@ class Orchestrator:
                     preview=preview.summary,
                     run_id=run_id,
                     risk_note=preview.risk_note,
+                    diff=preview.diff,
                 )
                 raise ApprovalRequired(request)
             approval_id = existing.id

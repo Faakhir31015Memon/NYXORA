@@ -50,14 +50,40 @@ jobs:
           grep -q '"status"' /tmp/health.json
 
   web:
-    # Skips cleanly until apps/web exists (Phase 4).
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
-      - name: Fail if apps/web exists without typecheck
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Types (tsc strict)
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: No untrusted-content rendering
+        # Model and document text must reach the DOM as text nodes only, so a
+        # prompt-injected answer cannot execute in the app's own origin.
         run: |
-          if [ -d apps/web ]; then
-            echo "apps/web exists - add a node typecheck job" >&2
+          if grep -rn "dangerouslySetInnerHTML\|innerHTML\|outerHTML" src; then
+            echo "untrusted text must never be injected as HTML" >&2
             exit 1
           fi
-          echo "no frontend yet - nothing to check"
+
+      - name: No third-party network calls from the UI
+        run: |
+          if grep -rn "fetch(\"http\|fetch('http\|https://" src --include=*.ts --include=*.tsx; then
+            echo "the UI talks to the proxied API origin only" >&2
+            exit 1
+          fi

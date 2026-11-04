@@ -30,6 +30,28 @@ SENSITIVE_PATTERNS: tuple[str, ...] = (
 )
 _SENSITIVE_RE = [re.compile(p) for p in SENSITIVE_PATTERNS]
 
+_MEMORY_INTENT_RE = re.compile(
+    r"^\s*(?:/remember\s+|please\s+)?"
+    r"(?:remember(?:\s+that)?|note|keep in mind|i\s+(?:want\s+you\s+to\s+)?remember)\b"
+    r"[:\-,\s]*(?P<body>.+)$",
+    re.IGNORECASE,
+)
+
+
+def explicit_memory_request(text: str) -> str | None:
+    """The only phrase pattern allowed to turn chat into a durable memory.
+
+    Deterministic on purpose: nothing here is inferred from "ordinary"
+    conversation. A guessed fact that the user confirms without reading it
+    becomes a permanent wrong premise in every future prompt, so capture
+    requires an explicit request and still lands as `pending`.
+    """
+    match = _MEMORY_INTENT_RE.match(" ".join((text or "").split()))
+    if match is None:
+        return None
+    body = match.group("body").strip().rstrip(".!; ")
+    return body if len(body) >= 3 else None
+
 MemoryState = str
 
 

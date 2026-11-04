@@ -18,7 +18,7 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from app.core.events import EventType
-from app.core.memory import MemoryEngine, MemoryProposalError
+from app.core.memory import MemoryEngine, MemoryProposalError, explicit_memory_request
 from app.core.orchestrator import RunRequest, RunState
 from app.core.rag import KnowledgeEngine
 from app.core.tools import TOOL_PERMISSIONS, ToolContext
@@ -319,7 +319,9 @@ async def chat(payload: ChatRequest, request: Request) -> StreamingResponse:
             logger.exception("chat_pump_failed")
             queue.put_nowait(sse("error", {"code": "run_failed", "message": str(exc)}))
         finally:
-            queue.put_nowait(sse("done", {"run_id": run_id}))
+            # The client may have sent no conversation_id and let us create one, so
+            # the id it needs for the reload has to come back on the wire.
+            queue.put_nowait(sse("done", {"run_id": run_id, "conversation_id": conversation_id}))
 
     task = asyncio.create_task(pump())
 
@@ -458,6 +460,7 @@ async def request_tool(name: str, payload: ToolRequest, request: Request) -> dic
         preview=preview.summary,
         run_id=payload.run_id,
         risk_note=preview.risk_note,
+        diff=preview.diff,
     )
     c.audit.write(
         actor="user",
