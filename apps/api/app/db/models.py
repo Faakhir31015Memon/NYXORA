@@ -235,16 +235,28 @@ CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON document_chunks BEGIN
 END;
 """
 
-FTS_DELETE = """
-CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON document_chunks BEGIN
+FTS_UPDATE = """
+CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON document_chunks BEGIN
     INSERT INTO document_chunks_fts(document_chunks_fts, rowid, content)
     VALUES ('delete', old.id, old.content);
+    INSERT INTO document_chunks_fts(rowid, content) VALUES (new.id, new.content);
 END;
 """
 
+FTS_STATEMENTS = (FTS_DDL, FTS_INSERT, FTS_DELETE, FTS_UPDATE)
 
-def make_engine(db_path: Path | str, *, create_fts: bool = True) -> Engine:
-    """SQLite with WAL, foreign keys, and FTS5. `:memory:` is supported for tests."""
+
+class FtsUnavailableError(RuntimeError):
+    """Raised when this SQLite build has no FTS5 module."""
+
+
+def make_engine(db_path: Path | str) -> Engine:
+    """SQLite with WAL and foreign keys. `:memory:` is supported for tests.
+
+    Call init_db() before using the engine: the FTS tables and triggers can only
+    be installed once document_chunks exists, so they belong to schema creation,
+    not to connection setup.
+    """
     target = ":memory:" if str(db_path) == ":memory:" else str(Path(db_path))
     if target != ":memory:":
         Path(target).parent.mkdir(parents=True, exist_ok=True)
@@ -258,22 +270,49 @@ def make_engine(db_path: Path | str, *, create_fts: bool = True) -> Engine:
         cur.execute("PRAGMA journal_mode=WAL")
         cur.close()
 
-    if create_fts:
-
-        @event.listens_for(engine, "connect")
-        def _fts(dbapi_conn: Any, _record: Any) -> None:
-            cur = dbapi_conn.cursor()
-            for ddl in (FTS_DDL, FTS_INSERT, FTS_DELETE):
-                with contextlib.suppress(Exception):  # FTS5 may be unavailable in this build
-                    cur.execute(ddl)
-            dbapi_conn.commit()
-            cur.close()
-
     return engine
+
+
+def install_fts(engine: Engine) -> bool:
+    """Create the FTS5 index and its triggers. True when the index is live.
+
+    Runs after create_all(), because CREATE TRIGGER ... ON document_chunks fails
+    with "no such table" while that table is still missing.
+    """
+    with contextlib.suppress(FtsUnavailableError):  # caller degrades to no-BM25 search
+        _fts_status(engine)
+    with engine.begin() as conn:
+        for ddl in FTS_STATEMENTS:
+            conn.execute(text(ddl))
+    return True
+
+
+def _fts_status(engine: Engine) -> None:
+    """Raise FtsUnavailableError if this SQLite build cannot do FTS5."""
+    with engine.connect() as conn:
+        try:
+            conn.execute(
+                text("CREATE VIRTUAL TABLE fts_probe USING fts5(body); DROP TABLE fts_probe;")
+            )
+        except Exception as exc:  # noqa: BLE001 - the only error we translate
+            msg = str(exc).lower()
+            if "no such module" in msg or "fts5" in msg:
+                raise FtsUnavailableError(str(exc)) from exc
+            raise
+
+
+def fts_ready(engine: Engine) -> bool:
+    """Whether BM25 retrieval is actually wired up in this database."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT count(*) FROM sqlite_master WHERE name = 'chunks_ai'")
+        ).scalar()
+    return bool(row)
 
 
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+    install_fts(engine)
 
 
 def session_scope(engine: Engine) -> Generator[Session, None, None]:
