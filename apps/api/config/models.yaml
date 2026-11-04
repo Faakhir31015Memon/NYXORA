@@ -1,0 +1,54 @@
+# NYXORA model catalogue overrides (blueprint 6.3, 6.5, 6.6).
+#
+# The app never assumes a model is installed. It asks Ollama what actually
+# exists and shows the exact `ollama pull` command for anything missing. This
+# file annotates the models you choose: capability tags, license, RAM hint and
+# whether a model is enabled. It is user-editable and safe to leave alone.
+#
+# Capability tags: chat reasoning coding summarization embedding vision
+#                  tool_use long_context structured_output
+
+models:
+  - name: "qwen2.5:3b"
+    provider: ollama
+    enabled: true
+    capabilities: [chat, reasoning, summarization]
+    context_window: 8192
+    ram_hint_gb: 3
+    license: "Apache-2.0"
+    # On an 8 GB machine this is the only model that should be expected.
+
+  - name: "qwen2.5:7b"
+    provider: ollama
+    enabled: true
+    capabilities: [chat, reasoning, summarization, long_context]
+    context_window: 8192
+    ram_hint_gb: 6
+    license: "Apache-2.0"
+
+  - name: "qwen2.5-coder:7b"
+    provider: ollama
+    enabled: true
+    capabilities: [chat, coding, tool_use]
+    context_window: 8192
+    ram_hint_gb: 6
+    license: "Apache-2.0"
+
+  - name: "nomic-embed-text"
+    provider: ollama
+    enabled: true
+    capabilities: [embedding]
+    context_window: 2048
+    ram_hint_gb: 1
+    license: "Apache-2.0"
+
+# Router scoring weights (blueprint 6.6). Loaded at startup and applied to the
+# router, so a routing decision can be re-tuned without touching code. Scores
+# stay deterministic: the same inputs always give the same answer.
+scoring:
+  capability: 0.40
+  context: 0.20
+  speed: 0.15
+  preference: 0.15
+  cost: 0.10
+  recency_penalty: 0.05

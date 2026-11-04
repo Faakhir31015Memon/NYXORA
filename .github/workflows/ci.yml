@@ -1,0 +1,63 @@
+name: ci
+
+# Free tier only: one job, no paid runners, no secrets required. The API must
+# be green without Ollama present, which is why the suite runs on mock adapters.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      - name: Types (mypy strict)
+        run: python -m mypy .
+
+      - name: Tests (pytest)
+        run: python -m pytest -q
+
+      - name: Boot check - the app must start with no Ollama and no keys
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          server=$!
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8000/health > /tmp/health.json; then break; fi
+            sleep 1
+          done
+          kill $server
+          cat /tmp/health.json
+          grep -q '"status"' /tmp/health.json
+
+  web:
+    # Skips cleanly until apps/web exists (Phase 4).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if apps/web exists without typecheck
+        run: |
+          if [ -d apps/web ]; then
+            echo "apps/web exists - add a node typecheck job" >&2
+            exit 1
+          fi
+          echo "no frontend yet - nothing to check"

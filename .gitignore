@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Secrets and local config
+.env
+.env.local
+*.token
+
+# Data and workspaces
+apps/api/data/
+workspace/
+.nyx/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Node
+node_modules/
+apps/web/dist/
+apps/web/.vite/
+coverage/
+
+# Tauri
+apps/web/src-tauri/target/
+
+# OS
+.DS_Store
+Thumbs.db
